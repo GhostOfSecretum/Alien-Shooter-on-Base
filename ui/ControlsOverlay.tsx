@@ -15,7 +15,7 @@ function VirtualJoystick({ onJoystickChange }: { onJoystickChange?: (x: number, 
   const containerRef = useRef<HTMLDivElement>(null);
   const [joystickPos, setJoystickPos] = useState({ x: 0, y: 0 });
   const [isActive, setIsActive] = useState(false);
-  const [origin, setOrigin] = useState({ x: 0, y: 0 });
+  const originRef = useRef({ x: 0, y: 0 });
   const activePointerId = useRef<number | null>(null);
 
   const JOYSTICK_SIZE = 120;
@@ -38,7 +38,7 @@ function VirtualJoystick({ onJoystickChange }: { onJoystickChange?: (x: number, 
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
     
-    setOrigin({ x: centerX, y: centerY });
+    originRef.current = { x: centerX, y: centerY };
     setIsActive(true);
     
     // Calculate initial position
@@ -69,6 +69,7 @@ function VirtualJoystick({ onJoystickChange }: { onJoystickChange?: (x: number, 
     e.preventDefault();
     e.stopPropagation();
     
+    const origin = originRef.current;
     const dx = e.clientX - origin.x;
     const dy = e.clientY - origin.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
@@ -90,7 +91,7 @@ function VirtualJoystick({ onJoystickChange }: { onJoystickChange?: (x: number, 
     }
     
     onJoystickChange?.(normX, normY, true);
-  }, [origin, onJoystickChange, MAX_DISTANCE]);
+  }, [onJoystickChange, MAX_DISTANCE]);
 
   const handlePointerUp = useCallback((e: PointerEvent<HTMLDivElement>) => {
     if (activePointerId.current !== e.pointerId) return;

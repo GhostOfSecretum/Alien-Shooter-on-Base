@@ -113,6 +113,21 @@ const MAX_DECALS = 200;
 const MAX_PARTICLES = 500;
 const MAX_PARTICLES_MOBILE = 260;
 
+// ============================================================================
+// ART ASSETS (PNG) - Modern sprite/texture pack
+// ============================================================================
+
+const ART_BASE_PATH = '/game-art';
+const PATTERN_FLOOR_SIZE = 128;
+const PATTERN_WALL_SIZE = 128;
+
+// Sprite sizing (tweakable without changing gameplay)
+const PLAYER_SPRITE_SCALE = 3.2; // multiplied by PLAYER_SIZE
+const ENEMY_SPRITE_SCALE = 2.9;  // multiplied by enemy.size
+const PICKUP_SPRITE_SIZE = 28;   // world pixels
+const BULLET_SPRITE_BASE = 18;   // world pixels (scaled by caliber)
+const PLAYER_SPRITE_ROT_OFFSET = -0.35; // radians, aligns authored sprite direction to aim angle
+
 const ENEMY_TYPES: Record<EnemyType, Omit<Enemy, 'x' | 'y' | 'alive' | 'attackCooldown' | 'animFrame' | 'hitFlash' | 'deathTimer'>> = {
   zombie: {
     hp: 40,
@@ -192,6 +207,20 @@ export class DoomEngine {
   private floorPattern: CanvasPattern | null = null;
   private wallTextures: Map<number, CanvasPattern> = new Map();
   private ambientParticles: { x: number; y: number; vx: number; vy: number; size: number; alpha: number }[] = [];
+  
+  // PNG art pack (loaded from public/)
+  private art = {
+    floor: null as HTMLImageElement | null,
+    walls: new Map<number, HTMLImageElement>(),
+    player: null as HTMLImageElement | null,
+    enemies: {} as Partial<Record<EnemyType, HTMLImageElement>>,
+    pickups: {} as Partial<Record<Pickup['type'], HTMLImageElement>>,
+    bullets: {
+      player: null as HTMLImageElement | null,
+      enemy: null as HTMLImageElement | null,
+      acid: null as HTMLImageElement | null,
+    },
+  };
   
   // Игровое состояние
   private levelIndex = 0;
@@ -534,12 +563,85 @@ export class DoomEngine {
     this.player.angle = Math.atan2(this.mouseY - screenY, this.mouseX - screenX);
   }
 
+  private async loadImage(src: string): Promise<HTMLImageElement> {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = src;
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error(`Failed to load image: ${src}`));
+    });
+    return img;
+  }
+
+  private createPatternFromImage(img: HTMLImageElement, size: number): CanvasPattern {
+    const c = document.createElement('canvas');
+    c.width = size;
+    c.height = size;
+    const cctx = c.getContext('2d', { alpha: false })!;
+    cctx.imageSmoothingEnabled = true;
+    cctx.imageSmoothingQuality = 'high';
+    cctx.drawImage(img, 0, 0, size, size);
+    const pattern = this.ctx.createPattern(c, 'repeat');
+    if (!pattern) throw new Error('Failed to create pattern');
+    return pattern;
+  }
+
+  private applyArtTexturesToPatterns() {
+    if (this.art.floor) {
+      this.floorPattern = this.createPatternFromImage(this.art.floor, PATTERN_FLOOR_SIZE);
+    }
+
+    // Wall tile ids are 1..4 in levels
+    for (const [tileId, img] of this.art.walls.entries()) {
+      this.wallTextures.set(tileId, this.createPatternFromImage(img, PATTERN_WALL_SIZE));
+    }
+  }
+
+  private async loadArt(onProgress: (progress: number) => void) {
+    // Keep the old procedural look as fallback; art pack only overrides if loaded.
+    const entries: Array<() => Promise<void>> = [
+      async () => { this.art.floor = await this.loadImage(`${ART_BASE_PATH}/floor.png`); },
+      async () => { this.art.walls.set(1, await this.loadImage(`${ART_BASE_PATH}/wall_brick.png`)); },
+      async () => { this.art.walls.set(2, await this.loadImage(`${ART_BASE_PATH}/wall_metal.png`)); },
+      async () => { this.art.walls.set(3, await this.loadImage(`${ART_BASE_PATH}/wall_concrete.png`)); },
+      async () => { this.art.walls.set(4, await this.loadImage(`${ART_BASE_PATH}/wall_tech.png`)); },
+      async () => { this.art.player = await this.loadImage(`${ART_BASE_PATH}/player.png`); },
+      async () => { this.art.enemies.zombie = await this.loadImage(`${ART_BASE_PATH}/enemy_zombie.png`); },
+      async () => { this.art.enemies.runner = await this.loadImage(`${ART_BASE_PATH}/enemy_runner.png`); },
+      async () => { this.art.enemies.tank = await this.loadImage(`${ART_BASE_PATH}/enemy_tank.png`); },
+      async () => { this.art.enemies.shooter = await this.loadImage(`${ART_BASE_PATH}/enemy_shooter.png`); },
+      async () => { this.art.enemies.spitter = await this.loadImage(`${ART_BASE_PATH}/enemy_spitter.png`); },
+      async () => { this.art.pickups.health = await this.loadImage(`${ART_BASE_PATH}/pickup_health.png`); },
+      async () => { this.art.pickups.ammo = await this.loadImage(`${ART_BASE_PATH}/pickup_ammo.png`); },
+      async () => { this.art.pickups.armor = await this.loadImage(`${ART_BASE_PATH}/pickup_armor.png`); },
+      async () => { this.art.bullets.player = await this.loadImage(`${ART_BASE_PATH}/bullet_player.png`); },
+      async () => { this.art.bullets.enemy = await this.loadImage(`${ART_BASE_PATH}/bullet_enemy.png`); },
+      async () => { this.art.bullets.acid = await this.loadImage(`${ART_BASE_PATH}/bullet_acid.png`); },
+    ];
+
+    // Progress slice (fits into existing loading bar)
+    const start = 0.25;
+    const span = 0.3;
+    for (let i = 0; i < entries.length; i++) {
+      await entries[i]();
+      onProgress(start + ((i + 1) / entries.length) * span);
+    }
+
+    this.applyArtTexturesToPatterns();
+  }
+
   async load(onProgress: (progress: number) => void) {
     this.status = 'loading';
     onProgress(0.05);
     this.wasmMath = await loadWasmMath();
-    onProgress(0.25);
+    onProgress(0.2);
     this.loadLevel(0);
+    onProgress(0.25);
+    
+    // Load PNG art pack (overrides procedural shapes/textures)
+    await this.loadArt(onProgress);
+    
     onProgress(0.6);
     await new Promise(resolve => setTimeout(resolve, 120));
     this.resize();
@@ -626,7 +728,11 @@ export class DoomEngine {
     const dpr = window.devicePixelRatio || 1;
     this.canvas.width = Math.max(1, Math.floor(rect.width * dpr));
     this.canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    // Reset transform so scale doesn't accumulate on repeated resizes
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.scale(dpr, dpr);
+    this.ctx.imageSmoothingEnabled = true;
+    this.ctx.imageSmoothingQuality = 'high';
   }
 
   private initAmbientParticles() {
@@ -2225,6 +2331,16 @@ export class DoomEngine {
       // Иконка с улучшенным рендерингом
       ctx.shadowColor = glowColors[0];
       ctx.shadowBlur = 10;
+
+      // PNG sprite override (keeps the same mechanics, just swaps the icon)
+      const pickupSprite = this.art.pickups[pickup.type];
+      if (pickupSprite) {
+        const size = PICKUP_SPRITE_SIZE;
+        ctx.drawImage(pickupSprite, -size / 2, -size / 2, size, size);
+        ctx.shadowBlur = 0;
+        ctx.restore();
+        continue;
+      }
       
       if (pickup.type === 'health') {
         // Аптечка с градиентом
@@ -2369,6 +2485,15 @@ export class DoomEngine {
       // Тело врага
       ctx.rotate(angleToPlayer);
       ctx.scale(breathe, breathe);
+
+      // PNG sprite override (keeps glows/shadows/hit flash above)
+      const enemySprite = this.art.enemies[enemy.type];
+      if (enemySprite) {
+        const size = enemy.size * ENEMY_SPRITE_SCALE;
+        ctx.drawImage(enemySprite, -size, -size, size * 2, size * 2);
+        ctx.restore();
+        continue;
+      }
       
       // Разные формы для разных типов
       if (enemy.type === 'zombie') {
@@ -2667,6 +2792,19 @@ export class DoomEngine {
       ctx.save();
       ctx.translate(bullet.x, bullet.y);
       ctx.rotate(angle);
+
+      // PNG sprite override (fallbacks to procedural if missing)
+      const bulletSprite = bullet.isEnemy
+        ? (bullet.caliber > 5 ? this.art.bullets.acid : this.art.bullets.enemy)
+        : this.art.bullets.player;
+      if (bulletSprite) {
+        const size = Math.max(10, BULLET_SPRITE_BASE + bullet.caliber * 4);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(bulletSprite, -size / 2, -size / 2, size, size);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.restore();
+        continue;
+      }
       
       // Улучшенный след с несколькими слоями
       const trailLength = bullet.isEnemy ? 20 : 35;
@@ -2847,6 +2985,17 @@ export class DoomEngine {
       ctx.shadowBlur = 0;
     }
     
+    // PNG sprite override (fallbacks to procedural if missing)
+    if (this.art.player) {
+      const size = PLAYER_SIZE * PLAYER_SPRITE_SCALE;
+      ctx.save();
+      ctx.rotate(PLAYER_SPRITE_ROT_OFFSET);
+      ctx.drawImage(this.art.player, -size, -size, size * 2, size * 2);
+      ctx.restore();
+      ctx.restore();
+      return;
+    }
+
     // Тело с улучшенным градиентом
     const bodyGradient = ctx.createRadialGradient(-5, -5, 0, 0, 0, PLAYER_SIZE);
     bodyGradient.addColorStop(0, '#6ab0ff');

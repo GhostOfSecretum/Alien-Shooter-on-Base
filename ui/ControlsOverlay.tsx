@@ -26,8 +26,8 @@ function VirtualJoystick({ onJoystickChange }: { onJoystickChange?: (x: number, 
   const callbackRef = useRef(onJoystickChange);
   callbackRef.current = onJoystickChange;
 
-  const JOYSTICK_SIZE = 120;
-  const KNOB_SIZE = 50;
+  const JOYSTICK_SIZE = 132;
+  const KNOB_SIZE = 52;
   const MAX_DISTANCE = (JOYSTICK_SIZE - KNOB_SIZE) / 2;
   const DEADZONE = 0.14;
 
@@ -159,7 +159,7 @@ function VirtualJoystick({ onJoystickChange }: { onJoystickChange?: (x: number, 
   return (
     <div
       ref={containerRef}
-      className="relative touch-none select-none"
+      className="virtual-joystick relative touch-none select-none ui-panel ui-scanlines ui-shimmer rounded-full"
       style={{ width: JOYSTICK_SIZE, height: JOYSTICK_SIZE }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -168,20 +168,44 @@ function VirtualJoystick({ onJoystickChange }: { onJoystickChange?: (x: number, 
       onLostPointerCapture={handleLostPointerCapture}
     >
       {/* Outer ring */}
-      <div
-        className="absolute inset-0 rounded-full border-4 transition-all duration-100"
+      <div className="absolute inset-0 rounded-full border-2"
         style={{
-          borderColor: isActive ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.3)',
-          backgroundColor: isActive ? 'rgba(50, 50, 50, 0.5)' : 'rgba(30, 30, 30, 0.4)',
+          borderColor: isActive ? 'rgba(34,211,238,0.58)' : 'rgba(148,163,184,0.28)',
+          boxShadow: isActive
+            ? '0 0 34px rgba(34,211,238,0.22), inset 0 0 0 1px rgba(34,211,238,0.15)'
+            : '0 0 18px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.05)',
+        }}
+      />
+
+      {/* Inner ring */}
+      <div className="absolute inset-[12px] rounded-full border"
+        style={{
+          borderColor: isActive ? 'rgba(245,158,11,0.36)' : 'rgba(148,163,184,0.18)',
+          background:
+            'radial-gradient(circle at 30% 30%, rgba(34,211,238,0.12) 0%, rgba(2,6,23,0.45) 55%, rgba(0,0,0,0.25) 100%)',
+        }}
+      />
+
+      {/* Center ring for precision feedback */}
+      <div
+        className="absolute rounded-full border pointer-events-none"
+        style={{
+          width: 30,
+          height: 30,
+          left: '50%',
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+          borderColor: isActive ? 'rgba(34,211,238,0.55)' : 'rgba(148,163,184,0.25)',
+          boxShadow: isActive ? '0 0 18px rgba(34,211,238,0.2)' : 'none',
         }}
       />
       
       {/* Direction indicators */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="absolute top-2 text-white/30 text-xs font-bold">▲</div>
-        <div className="absolute bottom-2 text-white/30 text-xs font-bold">▼</div>
-        <div className="absolute left-2 text-white/30 text-xs font-bold">◄</div>
-        <div className="absolute right-2 text-white/30 text-xs font-bold">►</div>
+        <div className="absolute top-2 text-white/25 text-[10px] font-bold tracking-widest">N</div>
+        <div className="absolute bottom-2 text-white/25 text-[10px] font-bold tracking-widest">S</div>
+        <div className="absolute left-2 text-white/25 text-[10px] font-bold tracking-widest">W</div>
+        <div className="absolute right-2 text-white/25 text-[10px] font-bold tracking-widest">E</div>
       </div>
       
       {/* Knob */}
@@ -194,12 +218,12 @@ function VirtualJoystick({ onJoystickChange }: { onJoystickChange?: (x: number, 
           top: '50%',
           transform: `translate(calc(-50% + ${joystickPos.x}px), calc(-50% + ${joystickPos.y}px))`,
           background: isActive 
-            ? 'radial-gradient(circle at 30% 30%, #6ab0ff, #2a5a99)'
-            : 'radial-gradient(circle at 30% 30%, #4a90d9, #1a3a69)',
+            ? 'radial-gradient(circle at 30% 30%, rgba(226,232,240,0.95), rgba(34,211,238,0.85), rgba(2,6,23,0.85))'
+            : 'radial-gradient(circle at 30% 30%, rgba(148,163,184,0.85), rgba(15,23,42,0.9), rgba(2,6,23,0.9))',
           boxShadow: isActive 
-            ? '0 0 20px rgba(106, 176, 255, 0.5), inset 0 2px 4px rgba(255, 255, 255, 0.3)'
-            : '0 4px 8px rgba(0, 0, 0, 0.4), inset 0 2px 4px rgba(255, 255, 255, 0.2)',
-          border: '3px solid rgba(255, 255, 255, 0.3)',
+            ? '0 0 30px rgba(34,211,238,0.34), 0 0 62px rgba(245,158,11,0.12), inset 0 1px 0 rgba(255,255,255,0.25)'
+            : '0 10px 20px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.12)',
+          border: isActive ? '2px solid rgba(34,211,238,0.35)' : '2px solid rgba(148,163,184,0.25)',
         }}
       />
     </div>
@@ -276,13 +300,31 @@ function AimZone({ onAimChange }: { onAimChange?: (screenX: number, screenY: num
   return (
     <div
       ref={zoneRef}
-      className="absolute inset-0 touch-none select-none"
+      className="aim-zone absolute inset-0 touch-none select-none"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
       onLostPointerCapture={handleLostPointerCapture}
     >
+      {/* faint tactical grid */}
+      <div
+        className="absolute inset-0 pointer-events-none opacity-[0.07]"
+        style={{
+          backgroundImage:
+            'linear-gradient(rgba(255,255,255,0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.12) 1px, transparent 1px)',
+          backgroundSize: '80px 80px',
+        }}
+      />
+
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background:
+            'radial-gradient(circle at 70% 50%, rgba(34,211,238,0.08) 0%, transparent 55%)',
+        }}
+      />
+
       {/* Visual feedback for aim position */}
       {aimPos && (
         <div
@@ -295,37 +337,41 @@ function AimZone({ onAimChange }: { onAimChange?: (screenX: number, screenY: num
         >
           {/* Outer ring */}
           <div
-            className="absolute rounded-full border-2 border-red-500/70 animate-ping"
+            className="absolute rounded-full border-2 animate-ping"
             style={{
               width: 60,
               height: 60,
               left: -30,
               top: -30,
+              borderColor: 'rgba(245,158,11,0.65)',
             }}
           />
           {/* Crosshair */}
           <div className="relative" style={{ width: 40, height: 40, marginLeft: -20, marginTop: -20 }}>
             {/* Horizontal line */}
-            <div className="absolute left-0 right-0 top-1/2 h-0.5 bg-red-500/80 -translate-y-1/2" />
+            <div className="absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2" style={{ background: 'rgba(34,211,238,0.85)' }} />
             {/* Vertical line */}
-            <div className="absolute top-0 bottom-0 left-1/2 w-0.5 bg-red-500/80 -translate-x-1/2" />
+            <div className="absolute top-0 bottom-0 left-1/2 w-0.5 -translate-x-1/2" style={{ background: 'rgba(34,211,238,0.85)' }} />
             {/* Center dot */}
-            <div className="absolute left-1/2 top-1/2 w-2 h-2 bg-red-500 rounded-full -translate-x-1/2 -translate-y-1/2" />
+            <div className="absolute left-1/2 top-1/2 w-2 h-2 rounded-full -translate-x-1/2 -translate-y-1/2"
+                 style={{ background: 'rgba(245,158,11,0.95)', boxShadow: '0 0 18px rgba(245,158,11,0.35)' }} />
             {/* Corner brackets */}
-            <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-red-500/80" />
-            <div className="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-red-500/80" />
-            <div className="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-red-500/80" />
-            <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-red-500/80" />
+            <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2" style={{ borderColor: 'rgba(245,158,11,0.75)' }} />
+            <div className="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2" style={{ borderColor: 'rgba(245,158,11,0.75)' }} />
+            <div className="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2" style={{ borderColor: 'rgba(245,158,11,0.75)' }} />
+            <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2" style={{ borderColor: 'rgba(245,158,11,0.75)' }} />
           </div>
         </div>
       )}
       
       {/* Hint text */}
       {!aimPos && (
-        <div className="absolute right-8 top-1/2 -translate-y-1/2 text-white/20 text-sm font-medium pointer-events-none">
-          <div className="flex flex-col items-center gap-2">
-            <div className="text-3xl">🎯</div>
-            <div className="text-center">Touch to<br/>aim & shoot</div>
+        <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none">
+          <div className="ui-panel ui-scanlines ui-shimmer rounded-2xl px-4 py-3 text-[12px] text-slate-300/70">
+            <div className="ui-mono text-[10px] tracking-[0.25em] text-slate-300/60">TACTICAL</div>
+            <div className="mt-1">
+              Touch to <span className="text-cyan-300/90">aim</span> & <span className="text-amber-300/90">fire</span>
+            </div>
           </div>
         </div>
       )}
@@ -337,7 +383,7 @@ export default function ControlsOverlay({ onControlChange, onJoystickChange, onA
   return (
     <div className="pointer-events-none absolute inset-0">
       {/* Joystick area (left side) */}
-      <div className="pointer-events-auto absolute left-4 bottom-28">
+      <div className="pointer-events-auto absolute left-4 bottom-24">
         <VirtualJoystick onJoystickChange={onJoystickChange} />
       </div>
 
@@ -350,8 +396,10 @@ export default function ControlsOverlay({ onControlChange, onJoystickChange, onA
       </div>
 
       {/* Mobile hint at bottom */}
-      <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 text-gray-500 text-xs text-center md:hidden">
-        Left: Move | Right: Aim & Shoot
+      <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 md:hidden">
+        <div className="ui-panel ui-scanlines ui-shimmer rounded-full px-5 py-2 text-[11px] text-slate-300/70 border border-slate-300/15">
+          <span className="ui-mono">MOVE</span> left · <span className="ui-mono">AIM/FIRE</span> right
+        </div>
       </div>
     </div>
   );

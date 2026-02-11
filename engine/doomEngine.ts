@@ -112,6 +112,9 @@ const WAVE_SPAWN_DELAY = 3;
 const MAX_DECALS = 200;
 const MAX_PARTICLES = 500;
 const MAX_PARTICLES_MOBILE = 260;
+const BASE_APP_DPR_CAP = 2;
+const TOUCH_DPR_CAP = 2;
+const DEFAULT_DPR_CAP = 3;
 
 // ============================================================================
 // ART ASSETS (PNG) - Modern sprite/texture pack
@@ -271,6 +274,10 @@ export class DoomEngine {
   private screenShake = 0;
   private readonly reducedFxMode: boolean;
   private readonly particleBudget: number;
+  private readonly maxDevicePixelRatio: number;
+  private readonly uiUpdateIntervalMs: number;
+  private viewportWidth = 1;
+  private viewportHeight = 1;
   
   // Камера
   private cameraX = 0;
@@ -288,8 +295,17 @@ export class DoomEngine {
     }
     this.ctx = ctx;
     this.onState = onState;
-    this.reducedFxMode = window.matchMedia('(pointer: coarse)').matches;
+    const win = window as Window & { base?: unknown; __BASE_APP__?: boolean };
+    const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+    const isBaseApp = typeof win.base !== 'undefined' || win.__BASE_APP__ === true;
+    this.reducedFxMode = isCoarsePointer || isBaseApp;
     this.particleBudget = this.reducedFxMode ? MAX_PARTICLES_MOBILE : MAX_PARTICLES;
+    this.maxDevicePixelRatio = isBaseApp
+      ? BASE_APP_DPR_CAP
+      : isCoarsePointer
+      ? TOUCH_DPR_CAP
+      : DEFAULT_DPR_CAP;
+    this.uiUpdateIntervalMs = this.reducedFxMode ? 180 : 120;
     
     this.canvas.addEventListener('mousemove', this.handleMouseMove);
     this.canvas.addEventListener('mousedown', this.handleMouseDown);
@@ -725,14 +741,25 @@ export class DoomEngine {
 
   resize() {
     const rect = this.canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    this.canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-    this.canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    const dpr = Math.min(window.devicePixelRatio || 1, this.maxDevicePixelRatio);
+    this.viewportWidth = Math.max(1, Math.floor(rect.width));
+    this.viewportHeight = Math.max(1, Math.floor(rect.height));
+    this.canvas.width = Math.max(1, Math.floor(this.viewportWidth * dpr));
+    this.canvas.height = Math.max(1, Math.floor(this.viewportHeight * dpr));
     // Reset transform so scale doesn't accumulate on repeated resizes
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.scale(dpr, dpr);
     this.ctx.imageSmoothingEnabled = true;
-    this.ctx.imageSmoothingQuality = 'high';
+    this.ctx.imageSmoothingQuality = this.reducedFxMode ? 'medium' : 'high';
+  }
+
+  private getViewportSize() {
+    if (this.viewportWidth <= 1 || this.viewportHeight <= 1) {
+      const rect = this.canvas.getBoundingClientRect();
+      this.viewportWidth = Math.max(1, Math.floor(rect.width));
+      this.viewportHeight = Math.max(1, Math.floor(rect.height));
+    }
+    return { width: this.viewportWidth, height: this.viewportHeight };
   }
 
   private initAmbientParticles() {
@@ -1688,16 +1715,16 @@ export class DoomEngine {
   }
 
   private updateCamera(dt: number) {
-    const rect = this.canvas.getBoundingClientRect();
-    const targetX = this.player.x - rect.width / 2;
-    const targetY = this.player.y - rect.height / 2;
+    const { width: viewportWidth, height: viewportHeight } = this.getViewportSize();
+    const targetX = this.player.x - viewportWidth / 2;
+    const targetY = this.player.y - viewportHeight / 2;
     
     this.cameraX += (targetX - this.cameraX) * Math.min(1, dt * 8);
     this.cameraY += (targetY - this.cameraY) * Math.min(1, dt * 8);
     
     if (this.level) {
-      const maxX = this.level.width * TILE_SIZE - rect.width;
-      const maxY = this.level.height * TILE_SIZE - rect.height;
+      const maxX = this.level.width * TILE_SIZE - viewportWidth;
+      const maxY = this.level.height * TILE_SIZE - viewportHeight;
       this.cameraX = Math.max(0, Math.min(maxX, this.cameraX));
       this.cameraY = Math.max(0, Math.min(maxY, this.cameraY));
     }
@@ -1723,9 +1750,7 @@ export class DoomEngine {
     if (!this.level) return;
     
     const ctx = this.ctx;
-    const rect = this.canvas.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
+    const { width: w, height: h } = this.getViewportSize();
     
     // Очистка - тёмный фон
     ctx.fillStyle = '#0a0a12';
@@ -1748,12 +1773,12 @@ export class DoomEngine {
     ctx.translate(-this.cameraX, -this.cameraY);
     
     // Рендеринг сцены
-    this.renderFloorAdvanced(ctx);
+    this.renderFloorAdvanced(ctx, w, h);
     if (!this.reducedFxMode) {
-      this.renderAmbientParticles(ctx);
+      this.renderAmbientParticles(ctx, w, h);
     }
     this.renderDecals(ctx);
-    this.renderWallsAdvanced(ctx);
+    this.renderWallsAdvanced(ctx, w, h);
     this.renderPickupsAdvanced(ctx);
     this.renderEnemiesAdvanced(ctx);
     this.renderBulletsAdvanced(ctx);
@@ -1891,20 +1916,18 @@ export class DoomEngine {
     ctx.fillRect(0, 0, w, h);
   }
 
-  private renderAmbientParticles(ctx: CanvasRenderingContext2D) {
+  private renderAmbientParticles(ctx: CanvasRenderingContext2D, viewportWidth: number, viewportHeight: number) {
     // Update and render ambient dust particles
-    const rect = this.canvas.getBoundingClientRect();
-    
     for (const p of this.ambientParticles) {
       // Move particles
       p.x += p.vx * 0.016;
       p.y += p.vy * 0.016;
       
       // Wrap around camera view
-      if (p.x < this.cameraX - 50) p.x = this.cameraX + rect.width + 50;
-      if (p.x > this.cameraX + rect.width + 50) p.x = this.cameraX - 50;
-      if (p.y < this.cameraY - 50) p.y = this.cameraY + rect.height + 50;
-      if (p.y > this.cameraY + rect.height + 50) p.y = this.cameraY - 50;
+      if (p.x < this.cameraX - 50) p.x = this.cameraX + viewportWidth + 50;
+      if (p.x > this.cameraX + viewportWidth + 50) p.x = this.cameraX - 50;
+      if (p.y < this.cameraY - 50) p.y = this.cameraY + viewportHeight + 50;
+      if (p.y > this.cameraY + viewportHeight + 50) p.y = this.cameraY - 50;
       
       // Render with soft glow
       ctx.save();
@@ -1920,17 +1943,17 @@ export class DoomEngine {
   }
 
   private renderFloor(ctx: CanvasRenderingContext2D) {
-    this.renderFloorAdvanced(ctx);
+    const { width, height } = this.getViewportSize();
+    this.renderFloorAdvanced(ctx, width, height);
   }
 
-  private renderFloorAdvanced(ctx: CanvasRenderingContext2D) {
+  private renderFloorAdvanced(ctx: CanvasRenderingContext2D, viewportWidth: number, viewportHeight: number) {
     if (!this.level || !this.floorPattern) return;
     
     const startTileX = Math.max(0, Math.floor(this.cameraX / TILE_SIZE));
     const startTileY = Math.max(0, Math.floor(this.cameraY / TILE_SIZE));
-    const rect = this.canvas.getBoundingClientRect();
-    const endTileX = Math.min(this.level.width, Math.ceil((this.cameraX + rect.width) / TILE_SIZE) + 1);
-    const endTileY = Math.min(this.level.height, Math.ceil((this.cameraY + rect.height) / TILE_SIZE) + 1);
+    const endTileX = Math.min(this.level.width, Math.ceil((this.cameraX + viewportWidth) / TILE_SIZE) + 1);
+    const endTileY = Math.min(this.level.height, Math.ceil((this.cameraY + viewportHeight) / TILE_SIZE) + 1);
     
     ctx.fillStyle = this.floorPattern;
     
@@ -2031,17 +2054,17 @@ export class DoomEngine {
   }
 
   private renderWalls(ctx: CanvasRenderingContext2D) {
-    this.renderWallsAdvanced(ctx);
+    const { width, height } = this.getViewportSize();
+    this.renderWallsAdvanced(ctx, width, height);
   }
 
-  private renderWallsAdvanced(ctx: CanvasRenderingContext2D) {
+  private renderWallsAdvanced(ctx: CanvasRenderingContext2D, viewportWidth: number, viewportHeight: number) {
     if (!this.level) return;
     
     const startTileX = Math.max(0, Math.floor(this.cameraX / TILE_SIZE));
     const startTileY = Math.max(0, Math.floor(this.cameraY / TILE_SIZE));
-    const rect = this.canvas.getBoundingClientRect();
-    const endTileX = Math.min(this.level.width, Math.ceil((this.cameraX + rect.width) / TILE_SIZE) + 1);
-    const endTileY = Math.min(this.level.height, Math.ceil((this.cameraY + rect.height) / TILE_SIZE) + 1);
+    const endTileX = Math.min(this.level.width, Math.ceil((this.cameraX + viewportWidth) / TILE_SIZE) + 1);
+    const endTileY = Math.min(this.level.height, Math.ceil((this.cameraY + viewportHeight) / TILE_SIZE) + 1);
     
     for (let y = startTileY; y < endTileY; y++) {
       for (let x = startTileX; x < endTileX; x++) {
@@ -3178,13 +3201,7 @@ export class DoomEngine {
       return;
     }
 
-    // Sort particles by type for better blending
-    const sortedParticles = [...this.particles].sort((a, b) => {
-      const order: Record<string, number> = { smoke: 0, blood: 1, gib: 2, shell: 3, spark: 4, ember: 5, dust: 6, explosion: 7, electric: 8 };
-      return (order[a.type] || 0) - (order[b.type] || 0);
-    });
-    
-    for (const p of sortedParticles) {
+    for (const p of this.particles) {
       const alpha = Math.min(1, p.life / p.maxLife);
       const fadeAlpha = p.life < 0.2 ? p.life / 0.2 : 1;
       
@@ -3793,7 +3810,7 @@ export class DoomEngine {
 
   private emitState(force = false) {
     const now = performance.now();
-    if (!force && now - this.lastUiUpdate < 120) return;
+    if (!force && now - this.lastUiUpdate < this.uiUpdateIntervalMs) return;
     this.lastUiUpdate = now;
     this.onState({
       level: this.levelIndex + 1,

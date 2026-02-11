@@ -133,6 +133,13 @@ body {
   }
 }
 
+@media (pointer: coarse) {
+  .doom-root::before {
+    mix-blend-mode: normal;
+    opacity: 0.35;
+  }
+}
+
 /* Mobile controls styling */
 .mobile-dpad {
   touch-action: none;
@@ -345,5 +352,22 @@ body {
       0 18px 55px rgba(0, 0, 0, 0.60),
       0 0 48px rgba(var(--ui-cyan), 0.14),
       inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  }
+}
+
+@media (pointer: coarse) {
+  .ui-panel,
+  .ui-button {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .ui-float {
+    animation: none;
+  }
+
+  .ui-shimmer::after {
+    animation: none;
+    opacity: 0;
   }
 }

@@ -23,6 +23,22 @@ const initialState: EngineSnapshot = {
   score: 0,
 };
 
+function hasSnapshotDiff(prev: EngineSnapshot, next: EngineSnapshot) {
+  return (
+    prev.level !== next.level ||
+    prev.levelName !== next.levelName ||
+    prev.health !== next.health ||
+    prev.ammo !== next.ammo ||
+    prev.kills !== next.kills ||
+    prev.fps !== next.fps ||
+    prev.soundEnabled !== next.soundEnabled ||
+    prev.muted !== next.muted ||
+    prev.status !== next.status ||
+    prev.wave !== next.wave ||
+    prev.score !== next.score
+  );
+}
+
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const appRef = useRef<DoomAppHandle | null>(null);
@@ -38,7 +54,10 @@ export default function Home() {
       const app = await initDoomMiniApp({
         canvas: canvasRef.current,
         onProgress: value => active && setProgress(value),
-        onState: snapshot => active && setState(snapshot),
+        onState: snapshot => {
+          if (!active) return;
+          setState(prev => (hasSnapshotDiff(prev, snapshot) ? snapshot : prev));
+        },
       });
       appRef.current = app;
       if (active) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useEffect, useState } from 'react';
-import type { PointerEvent, TouchEvent } from 'react';
+import type { PointerEvent } from 'react';
 import { ControlKey } from '@/engine/input';
 
 type ControlsOverlayProps = {
@@ -29,99 +29,132 @@ function VirtualJoystick({ onJoystickChange }: { onJoystickChange?: (x: number, 
   const JOYSTICK_SIZE = 120;
   const KNOB_SIZE = 50;
   const MAX_DISTANCE = (JOYSTICK_SIZE - KNOB_SIZE) / 2;
+  const DEADZONE = 0.14;
 
-  // Continuous update loop
-  useEffect(() => {
-    let running = true;
-    const loop = () => {
-      if (!running) return;
-      if (stateRef.current.active) {
-        callbackRef.current?.(stateRef.current.normX, stateRef.current.normY, true);
-      }
-      requestAnimationFrame(loop);
-    };
-    requestAnimationFrame(loop);
-    return () => { running = false; };
-  }, []);
+  const emitJoystick = (active: boolean) => {
+    callbackRef.current?.(stateRef.current.normX, stateRef.current.normY, active);
+  };
 
-  const calculateJoystick = (clientX: number, clientY: number) => {
+  const resetJoystick = () => {
+    stateRef.current.pointerId = null;
+    stateRef.current.active = false;
+    stateRef.current.normX = 0;
+    stateRef.current.normY = 0;
+    setIsActive(false);
+    setJoystickPos({ x: 0, y: 0 });
+    emitJoystick(false);
+  };
+
+  const updateJoystickFromClientPoint = (clientX: number, clientY: number) => {
     const dx = clientX - stateRef.current.originX;
     const dy = clientY - stateRef.current.originY;
     const distance = Math.sqrt(dx * dx + dy * dy);
-    
+
     if (distance > 0) {
       const clampedDistance = Math.min(distance, MAX_DISTANCE);
-      const normX = (dx / distance) * (clampedDistance / MAX_DISTANCE);
-      const normY = (dy / distance) * (clampedDistance / MAX_DISTANCE);
-      
+      const rawMagnitude = clampedDistance / MAX_DISTANCE;
+      const normalizedDx = dx / distance;
+      const normalizedDy = dy / distance;
+      const adjustedMagnitude = rawMagnitude <= DEADZONE
+        ? 0
+        : (rawMagnitude - DEADZONE) / (1 - DEADZONE);
+      const normX = normalizedDx * adjustedMagnitude;
+      const normY = normalizedDy * adjustedMagnitude;
+
       stateRef.current.normX = normX;
       stateRef.current.normY = normY;
-      
+
       setJoystickPos({
-        x: (dx / distance) * clampedDistance,
-        y: (dy / distance) * clampedDistance,
+        x: normalizedDx * clampedDistance,
+        y: normalizedDy * clampedDistance,
       });
     } else {
       stateRef.current.normX = 0;
       stateRef.current.normY = 0;
       setJoystickPos({ x: 0, y: 0 });
     }
+
+    emitJoystick(stateRef.current.active);
   };
 
   const handlePointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (stateRef.current.pointerId !== null) return;
-    
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+
     e.preventDefault();
     e.stopPropagation();
-    
+
     const container = containerRef.current;
     if (!container) return;
-    
+
     stateRef.current.pointerId = e.pointerId;
     container.setPointerCapture(e.pointerId);
-    
+
     const rect = container.getBoundingClientRect();
     stateRef.current.originX = rect.left + rect.width / 2;
     stateRef.current.originY = rect.top + rect.height / 2;
     stateRef.current.active = true;
-    
-    calculateJoystick(e.clientX, e.clientY);
+
+    updateJoystickFromClientPoint(e.clientX, e.clientY);
     setIsActive(true);
   };
 
   const handlePointerMove = (e: PointerEvent<HTMLDivElement>) => {
     if (stateRef.current.pointerId !== e.pointerId) return;
-    
+    if (!stateRef.current.active) return;
+
     e.preventDefault();
     e.stopPropagation();
-    
-    calculateJoystick(e.clientX, e.clientY);
+
+    updateJoystickFromClientPoint(e.clientX, e.clientY);
+  };
+
+  const releasePointerCapture = (pointerId: number) => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (container.hasPointerCapture(pointerId)) {
+      container.releasePointerCapture(pointerId);
+    }
   };
 
   const handlePointerUp = (e: PointerEvent<HTMLDivElement>) => {
     if (stateRef.current.pointerId !== e.pointerId) return;
-    
+
     e.preventDefault();
     e.stopPropagation();
-    
-    stateRef.current.pointerId = null;
-    stateRef.current.active = false;
-    stateRef.current.normX = 0;
-    stateRef.current.normY = 0;
-    setIsActive(false);
-    setJoystickPos({ x: 0, y: 0 });
-    callbackRef.current?.(0, 0, false);
+
+    releasePointerCapture(e.pointerId);
+    resetJoystick();
   };
 
-  const handlePointerCancel = () => {
-    stateRef.current.pointerId = null;
-    stateRef.current.active = false;
-    stateRef.current.normX = 0;
-    stateRef.current.normY = 0;
-    setIsActive(false);
-    setJoystickPos({ x: 0, y: 0 });
-    callbackRef.current?.(0, 0, false);
+  const handlePointerCancel = (e: PointerEvent<HTMLDivElement>) => {
+    if (stateRef.current.pointerId !== e.pointerId) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    releasePointerCapture(e.pointerId);
+    resetJoystick();
   };
+
+  const handleLostPointerCapture = (e: PointerEvent<HTMLDivElement>) => {
+    if (stateRef.current.pointerId !== e.pointerId) return;
+    resetJoystick();
+  };
+
+  useEffect(() => {
+    const handleBlur = () => {
+      if (stateRef.current.active) {
+        resetJoystick();
+      }
+    };
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('visibilitychange', handleBlur);
+    return () => {
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('visibilitychange', handleBlur);
+    };
+  }, []);
 
   return (
     <div
@@ -132,7 +165,7 @@ function VirtualJoystick({ onJoystickChange }: { onJoystickChange?: (x: number, 
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
-      onPointerLeave={handlePointerCancel}
+      onLostPointerCapture={handleLostPointerCapture}
     >
       {/* Outer ring */}
       <div
@@ -211,12 +244,30 @@ function AimZone({ onAimChange }: { onAimChange?: (screenX: number, screenY: num
     e.preventDefault();
     e.stopPropagation();
     
+    if (zoneRef.current?.hasPointerCapture(e.pointerId)) {
+      zoneRef.current.releasePointerCapture(e.pointerId);
+    }
     activePointerId.current = null;
     setAimPos(null);
     onAimChange?.(0, 0, false);
   }, [onAimChange]);
 
-  const handlePointerCancel = useCallback(() => {
+  const handlePointerCancel = useCallback((e: PointerEvent<HTMLDivElement>) => {
+    if (activePointerId.current !== e.pointerId) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (zoneRef.current?.hasPointerCapture(e.pointerId)) {
+      zoneRef.current.releasePointerCapture(e.pointerId);
+    }
+    activePointerId.current = null;
+    setAimPos(null);
+    onAimChange?.(0, 0, false);
+  }, [onAimChange]);
+
+  const handleLostPointerCapture = useCallback((e: PointerEvent<HTMLDivElement>) => {
+    if (activePointerId.current !== e.pointerId) return;
     activePointerId.current = null;
     setAimPos(null);
     onAimChange?.(0, 0, false);
@@ -230,7 +281,7 @@ function AimZone({ onAimChange }: { onAimChange?: (screenX: number, screenY: num
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
-      onPointerLeave={handlePointerCancel}
+      onLostPointerCapture={handleLostPointerCapture}
     >
       {/* Visual feedback for aim position */}
       {aimPos && (

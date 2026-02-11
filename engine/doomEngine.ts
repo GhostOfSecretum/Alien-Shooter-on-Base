@@ -111,6 +111,7 @@ const FIRE_RATE = 0.08;
 const WAVE_SPAWN_DELAY = 3;
 const MAX_DECALS = 200;
 const MAX_PARTICLES = 500;
+const MAX_PARTICLES_MOBILE = 260;
 
 const ENEMY_TYPES: Record<EnemyType, Omit<Enemy, 'x' | 'y' | 'alive' | 'attackCooldown' | 'animFrame' | 'hitFlash' | 'deathTimer'>> = {
   zombie: {
@@ -234,10 +235,13 @@ export class DoomEngine {
   private fps = 0;
   private lastUiUpdate = 0;
   private fireCooldown = 0;
+  private shotSoundCooldown = 0;
   private hitFlash = 0;
   private rafId = 0;
   private gameTime = 0;
   private screenShake = 0;
+  private readonly reducedFxMode: boolean;
+  private readonly particleBudget: number;
   
   // Камера
   private cameraX = 0;
@@ -255,6 +259,8 @@ export class DoomEngine {
     }
     this.ctx = ctx;
     this.onState = onState;
+    this.reducedFxMode = window.matchMedia('(pointer: coarse)').matches;
+    this.particleBudget = this.reducedFxMode ? MAX_PARTICLES_MOBILE : MAX_PARTICLES;
     
     this.canvas.addEventListener('mousemove', this.handleMouseMove);
     this.canvas.addEventListener('mousedown', this.handleMouseDown);
@@ -587,10 +593,6 @@ export class DoomEngine {
     this.input.joystickX = x;
     this.input.joystickY = y;
     this.input.joystickActive = active;
-    // Debug
-    if (active && (Math.abs(x) > 0.1 || Math.abs(y) > 0.1)) {
-      console.log('Engine received joystick:', { x, y, active });
-    }
   }
 
   setAim(screenX: number, screenY: number, active: boolean) {
@@ -834,6 +836,7 @@ export class DoomEngine {
     }
     
     this.fireCooldown = Math.max(0, this.fireCooldown - dt);
+    this.shotSoundCooldown = Math.max(0, this.shotSoundCooldown - dt);
     this.hitFlash = Math.max(0, this.hitFlash - dt);
     
     if (this.input.fire && this.fireCooldown <= 0 && this.player.ammo > 0) {
@@ -853,7 +856,10 @@ export class DoomEngine {
 
   private shoot() {
     this.player.ammo--;
-    this.audio.playShot();
+    if (!this.reducedFxMode || this.shotSoundCooldown <= 0) {
+      this.audio.playShot();
+      this.shotSoundCooldown = this.reducedFxMode ? 0.12 : 0;
+    }
     this.screenShake = Math.min(this.screenShake + 0.6, 4);
     
     const spread = (Math.random() - 0.5) * 0.04;
@@ -872,6 +878,11 @@ export class DoomEngine {
       caliber: 3,
     });
     
+    const muzzleFxScale = this.reducedFxMode ? 0.5 : 1;
+    const sparksCount = Math.max(4, Math.round(12 * muzzleFxScale));
+    const embersCount = Math.max(1, Math.round(4 * muzzleFxScale));
+    const smokeCount = Math.max(1, Math.round(3 * muzzleFxScale));
+
     // Улучшенная дульная вспышка - многослойная
     this.lights.push({
       x: this.player.x + cos * 35,
@@ -883,23 +894,25 @@ export class DoomEngine {
       maxLife: 0.06,
     });
     
-    // Вторичная вспышка
-    this.lights.push({
-      x: this.player.x + cos * 25,
-      y: this.player.y + sin * 25,
-      radius: 60,
-      intensity: 0.8,
-      color: '#ff8800',
-      life: 0.04,
-      maxLife: 0.04,
-    });
+    if (!this.reducedFxMode) {
+      // Вторичная вспышка
+      this.lights.push({
+        x: this.player.x + cos * 25,
+        y: this.player.y + sin * 25,
+        radius: 60,
+        intensity: 0.8,
+        color: '#ff8800',
+        life: 0.04,
+        maxLife: 0.04,
+      });
+    }
     
     // Улучшенные частицы огня - больше и разнообразнее
     const muzzleX = this.player.x + cos * 30;
     const muzzleY = this.player.y + sin * 30;
     
     // Яркие искры
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < sparksCount; i++) {
       const sparkAngle = angle + (Math.random() - 0.5) * 0.6;
       const speed = 250 + Math.random() * 200;
       this.particles.push({
@@ -920,7 +933,7 @@ export class DoomEngine {
     }
     
     // Тлеющие угольки (медленнее, дольше живут)
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < embersCount; i++) {
       const emberAngle = angle + (Math.random() - 0.5) * 1.2;
       this.particles.push({
         x: muzzleX,
@@ -939,7 +952,7 @@ export class DoomEngine {
     }
     
     // Дым от выстрела
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < smokeCount; i++) {
       const smokeAngle = angle + (Math.random() - 0.5) * 0.8;
       this.particles.push({
         x: muzzleX + (Math.random() - 0.5) * 10,
@@ -957,34 +970,39 @@ export class DoomEngine {
       });
     }
     
-    // Улучшенная гильза с реалистичной физикой
-    const shellAngle = this.player.angle + Math.PI / 2 + (Math.random() - 0.5) * 0.3;
-    const shellSpeed = 90 + Math.random() * 50;
-    this.particles.push({
-      x: this.player.x + Math.cos(shellAngle) * 10,
-      y: this.player.y + Math.sin(shellAngle) * 10,
-      vx: Math.cos(shellAngle) * shellSpeed,
-      vy: Math.sin(shellAngle) * shellSpeed - 80 - Math.random() * 40,
-      life: 2.5,
-      maxLife: 2.5,
-      color: '#d4a574',
-      size: 5,
-      type: 'shell',
-      rotation: Math.random() * Math.PI * 2,
-      rotationSpeed: 18 + Math.random() * 12,
-      gravity: 500,
-    });
-    
-    // Маленькая вспышка у гильзы
-    this.lights.push({
-      x: this.player.x + Math.cos(shellAngle) * 10,
-      y: this.player.y + Math.sin(shellAngle) * 10,
-      radius: 20,
-      intensity: 0.4,
-      color: '#ffcc88',
-      life: 0.03,
-      maxLife: 0.03,
-    });
+    const shouldSpawnShell = !this.reducedFxMode || Math.random() < 0.35;
+    if (shouldSpawnShell) {
+      // Улучшенная гильза с реалистичной физикой
+      const shellAngle = this.player.angle + Math.PI / 2 + (Math.random() - 0.5) * 0.3;
+      const shellSpeed = 90 + Math.random() * 50;
+      this.particles.push({
+        x: this.player.x + Math.cos(shellAngle) * 10,
+        y: this.player.y + Math.sin(shellAngle) * 10,
+        vx: Math.cos(shellAngle) * shellSpeed,
+        vy: Math.sin(shellAngle) * shellSpeed - 80 - Math.random() * 40,
+        life: 2.5,
+        maxLife: 2.5,
+        color: '#d4a574',
+        size: 5,
+        type: 'shell',
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: 18 + Math.random() * 12,
+        gravity: 500,
+      });
+      
+      // Маленькая вспышка у гильзы
+      if (!this.reducedFxMode) {
+        this.lights.push({
+          x: this.player.x + Math.cos(shellAngle) * 10,
+          y: this.player.y + Math.sin(shellAngle) * 10,
+          radius: 20,
+          intensity: 0.4,
+          color: '#ffcc88',
+          life: 0.03,
+          maxLife: 0.03,
+        });
+      }
+    }
   }
 
   private updateBullets(dt: number) {
@@ -995,7 +1013,9 @@ export class DoomEngine {
       
       if (this.isWall(bullet.x, bullet.y)) {
         bullet.life = 0;
-        this.spawnWallHitEffect(bullet.x, bullet.y);
+        if (!this.reducedFxMode || Math.random() > 0.55) {
+          this.spawnWallHitEffect(bullet.x, bullet.y);
+        }
       }
       
       if (!bullet.isEnemy && bullet.life > 0) {
@@ -1034,8 +1054,13 @@ export class DoomEngine {
   }
 
   private spawnWallHitEffect(x: number, y: number) {
+    const worldFxScale = this.reducedFxMode ? 0.45 : 1;
+    const sparkCount = Math.max(6, Math.round(18 * worldFxScale));
+    const debrisCount = Math.max(3, Math.round(8 * worldFxScale));
+    const smokeCount = Math.max(1, Math.round(2 * worldFxScale));
+
     // Яркие искры от металла/камня
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < sparkCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 120 + Math.random() * 200;
       const isWhite = Math.random() > 0.6;
@@ -1056,7 +1081,7 @@ export class DoomEngine {
     }
     
     // Осколки/пыль от стены
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < debrisCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 40 + Math.random() * 80;
       this.particles.push({
@@ -1075,7 +1100,7 @@ export class DoomEngine {
     }
     
     // Небольшое облако пыли
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < smokeCount; i++) {
       this.particles.push({
         x: x + (Math.random() - 0.5) * 10,
         y: y + (Math.random() - 0.5) * 10,
@@ -1510,8 +1535,8 @@ export class DoomEngine {
       }
     }
     
-    if (this.particles.length > MAX_PARTICLES) {
-      this.particles = this.particles.slice(-MAX_PARTICLES);
+    if (this.particles.length > this.particleBudget) {
+      this.particles = this.particles.slice(-this.particleBudget);
     }
     
     this.particles = this.particles.filter(p => p.life > 0);

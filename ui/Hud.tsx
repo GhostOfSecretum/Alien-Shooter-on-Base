@@ -9,8 +9,14 @@ type HudProps = {
 };
 
 export default function Hud({ state, onRestart, onToggleSound }: HudProps) {
+  const buildLabel = process.env.NEXT_PUBLIC_BUILD_LABEL ?? 'v1.0+local';
+
   return (
     <div className="pointer-events-none absolute inset-0 text-white">
+      <div className="absolute left-4 top-4 rounded-md border border-gray-700/80 bg-black/55 px-2 py-1 text-[10px] text-gray-300">
+        Build {buildLabel}
+      </div>
+
       {/* Top right buttons */}
       <div className="pointer-events-auto absolute top-4 right-4 flex items-center gap-2">
         <button 

@@ -5,6 +5,9 @@ type StartOverlayProps = {
 };
 
 export default function StartOverlay({ onStart }: StartOverlayProps) {
+  const gameVersion = process.env.NEXT_PUBLIC_GAME_VERSION ?? 'v1.0';
+  const buildHash = process.env.NEXT_PUBLIC_BUILD_HASH ?? 'local';
+
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-black via-gray-900 to-black text-white overflow-hidden">
       {/* Animated background */}
@@ -88,7 +91,9 @@ export default function StartOverlay({ onStart }: StartOverlayProps) {
         </button>
 
         {/* Version */}
-        <div className="text-gray-600 text-xs mt-4">v2.0 - Top-Down Shooter</div>
+        <div className="text-gray-600 text-xs mt-4">
+          {gameVersion} ({buildHash}) - Top-Down Shooter
+        </div>
       </div>
     </div>
   );

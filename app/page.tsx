@@ -161,8 +161,6 @@ export default function Home() {
   }, [started]);
 
   const handleJoystickChange = useCallback((x: number, y: number, active: boolean) => {
-    // Debug log
-    console.log('Joystick:', { x: x.toFixed(2), y: y.toFixed(2), active });
     appRef.current?.setJoystick(x, y, active);
     if (active) {
       appRef.current?.enableAudio();

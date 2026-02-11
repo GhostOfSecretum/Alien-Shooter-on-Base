@@ -860,7 +860,8 @@ export class DoomEngine {
       this.audio.playShot();
       this.shotSoundCooldown = this.reducedFxMode ? 0.12 : 0;
     }
-    this.screenShake = Math.min(this.screenShake + 0.6, 4);
+    const shotShake = this.reducedFxMode ? 0.3 : 0.6;
+    this.screenShake = Math.min(this.screenShake + shotShake, 4);
     
     const spread = (Math.random() - 0.5) * 0.04;
     const angle = this.player.angle + spread;
@@ -1628,9 +1629,10 @@ export class DoomEngine {
     
     // Screen shake с улучшенным эффектом
     if (this.screenShake > 0) {
-      const shakeX = (Math.random() - 0.5) * this.screenShake * 2;
-      const shakeY = (Math.random() - 0.5) * this.screenShake * 2;
-      const shakeRot = (Math.random() - 0.5) * this.screenShake * 0.002;
+      const shakeScale = this.reducedFxMode ? 0.55 : 1;
+      const shakeX = (Math.random() - 0.5) * this.screenShake * 2 * shakeScale;
+      const shakeY = (Math.random() - 0.5) * this.screenShake * 2 * shakeScale;
+      const shakeRot = (Math.random() - 0.5) * this.screenShake * 0.002 * shakeScale;
       ctx.translate(w / 2, h / 2);
       ctx.rotate(shakeRot);
       ctx.translate(-w / 2, -h / 2);
@@ -1641,7 +1643,9 @@ export class DoomEngine {
     
     // Рендеринг сцены
     this.renderFloorAdvanced(ctx);
-    this.renderAmbientParticles(ctx);
+    if (!this.reducedFxMode) {
+      this.renderAmbientParticles(ctx);
+    }
     this.renderDecals(ctx);
     this.renderWallsAdvanced(ctx);
     this.renderPickupsAdvanced(ctx);
@@ -1654,7 +1658,9 @@ export class DoomEngine {
     ctx.restore();
     
     // Post-processing эффекты
-    this.renderPostProcessing(ctx, w, h);
+    if (!this.reducedFxMode) {
+      this.renderPostProcessing(ctx, w, h);
+    }
     
     // Hit flash overlay
     if (this.hitFlash > 0) {
@@ -1668,6 +1674,21 @@ export class DoomEngine {
   }
 
   private renderLightsAdvanced(ctx: CanvasRenderingContext2D) {
+    if (this.reducedFxMode) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const mobileLights = this.lights.slice(-6);
+      for (const light of mobileLights) {
+        ctx.globalAlpha = Math.min(0.65, light.intensity * 0.75);
+        ctx.fillStyle = light.color;
+        ctx.beginPath();
+        ctx.arc(light.x, light.y, light.radius * 0.7, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+      return;
+    }
+
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     
@@ -2985,6 +3006,29 @@ export class DoomEngine {
   }
 
   private renderParticlesAdvanced(ctx: CanvasRenderingContext2D) {
+    if (this.reducedFxMode) {
+      for (const p of this.particles) {
+        const alpha = Math.min(1, p.life / p.maxLife);
+        const fadeAlpha = p.life < 0.2 ? p.life / 0.2 : 1;
+        ctx.globalAlpha = alpha * fadeAlpha;
+        if (p.type === 'smoke') {
+          ctx.fillStyle = 'rgba(120, 120, 120, 0.6)';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * 0.6, 0, Math.PI * 2);
+          ctx.fill();
+          continue;
+        }
+
+        const radius = p.type === 'spark' || p.type === 'ember' ? p.size * 0.6 : p.size * 0.5;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      return;
+    }
+
     // Sort particles by type for better blending
     const sortedParticles = [...this.particles].sort((a, b) => {
       const order: Record<string, number> = { smoke: 0, blood: 1, gib: 2, shell: 3, spark: 4, ember: 5, dust: 6, explosion: 7, electric: 8 };

@@ -713,17 +713,15 @@ export class DoomEngine {
     this.input.joystickActive = active;
   }
 
-  setAim(screenX: number, screenY: number, active: boolean) {
-    this.input.aimX = screenX;
-    this.input.aimY = screenY;
+  setAim(x: number, y: number, active: boolean) {
+    this.input.aimX = x;
+    this.input.aimY = y;
     this.input.aimActive = active;
-    this.input.fire = active;
-    
-    if (active) {
-      // Update player angle based on touch position
-      const playerScreenX = this.player.x - this.cameraX;
-      const playerScreenY = this.player.y - this.cameraY;
-      this.player.angle = Math.atan2(screenY - playerScreenY, screenX - playerScreenX);
+    const hasAimVector = Math.abs(x) > 0 || Math.abs(y) > 0;
+    this.input.fire = active && hasAimVector;
+
+    if (active && hasAimVector) {
+      this.player.angle = Math.atan2(y, x);
     }
   }
 
@@ -977,11 +975,12 @@ export class DoomEngine {
       this.fireCooldown = FIRE_RATE;
     }
     
-    // Update aim from touch (mobile) or mouse (desktop)
+    // Update aim from stick (mobile) or mouse (desktop)
     if (this.input.aimActive) {
-      const playerScreenX = this.player.x - this.cameraX;
-      const playerScreenY = this.player.y - this.cameraY;
-      this.player.angle = Math.atan2(this.input.aimY - playerScreenY, this.input.aimX - playerScreenX);
+      const hasAimVector = Math.abs(this.input.aimX) > 0 || Math.abs(this.input.aimY) > 0;
+      if (hasAimVector) {
+        this.player.angle = Math.atan2(this.input.aimY, this.input.aimX);
+      }
     } else {
       this.updatePlayerAngle();
     }

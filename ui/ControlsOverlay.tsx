@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import type { PointerEvent } from 'react';
 import { ControlKey } from '@/engine/input';
 
@@ -230,17 +230,21 @@ function VirtualJoystick({ onJoystickChange }: { onJoystickChange?: (x: number, 
   );
 }
 
-// Aim Joystick Component (right side of screen)
+// Aim joystick component (right side of screen)
 function AimJoystick({ onAimChange }: { onAimChange?: (x: number, y: number, active: boolean) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [joystickPos, setJoystickPos] = useState({ x: 0, y: 0 });
   const [isActive, setIsActive] = useState(false);
+  const [isOutsideDeadzone, setIsOutsideDeadzone] = useState(false);
+  const [deadzonePulse, setDeadzonePulse] = useState(false);
+  const deadzonePulseTimeoutRef = useRef<number | null>(null);
   const stateRef = useRef({
     active: false,
     originX: 0,
     originY: 0,
     normX: 0,
     normY: 0,
+    outsideDeadzone: false,
     pointerId: null as number | null,
   });
   const callbackRef = useRef(onAimChange);
@@ -250,17 +254,38 @@ function AimJoystick({ onAimChange }: { onAimChange?: (x: number, y: number, act
   const KNOB_SIZE = 52;
   const MAX_DISTANCE = (JOYSTICK_SIZE - KNOB_SIZE) / 2;
   const DEADZONE = 0.14;
+  const DEADZONE_RING_SIZE = KNOB_SIZE + MAX_DISTANCE * DEADZONE * 2;
 
   const emitAim = (active: boolean) => {
     callbackRef.current?.(stateRef.current.normX, stateRef.current.normY, active);
   };
 
+  const clearDeadzonePulseTimeout = () => {
+    if (deadzonePulseTimeoutRef.current !== null) {
+      window.clearTimeout(deadzonePulseTimeoutRef.current);
+      deadzonePulseTimeoutRef.current = null;
+    }
+  };
+
+  const triggerDeadzonePulse = () => {
+    clearDeadzonePulseTimeout();
+    setDeadzonePulse(true);
+    deadzonePulseTimeoutRef.current = window.setTimeout(() => {
+      setDeadzonePulse(false);
+      deadzonePulseTimeoutRef.current = null;
+    }, 140);
+  };
+
   const resetJoystick = () => {
+    clearDeadzonePulseTimeout();
     stateRef.current.pointerId = null;
     stateRef.current.active = false;
     stateRef.current.normX = 0;
     stateRef.current.normY = 0;
+    stateRef.current.outsideDeadzone = false;
     setIsActive(false);
+    setIsOutsideDeadzone(false);
+    setDeadzonePulse(false);
     setJoystickPos({ x: 0, y: 0 });
     emitAim(false);
   };
@@ -275,6 +300,7 @@ function AimJoystick({ onAimChange }: { onAimChange?: (x: number, y: number, act
       const rawMagnitude = clampedDistance / MAX_DISTANCE;
       const normalizedDx = dx / distance;
       const normalizedDy = dy / distance;
+      const outsideDeadzone = rawMagnitude > DEADZONE;
       const adjustedMagnitude = rawMagnitude <= DEADZONE
         ? 0
         : (rawMagnitude - DEADZONE) / (1 - DEADZONE);
@@ -288,10 +314,22 @@ function AimJoystick({ onAimChange }: { onAimChange?: (x: number, y: number, act
         x: normalizedDx * clampedDistance,
         y: normalizedDy * clampedDistance,
       });
+
+      if (outsideDeadzone !== stateRef.current.outsideDeadzone) {
+        stateRef.current.outsideDeadzone = outsideDeadzone;
+        setIsOutsideDeadzone(outsideDeadzone);
+        if (outsideDeadzone) {
+          triggerDeadzonePulse();
+        }
+      }
     } else {
       stateRef.current.normX = 0;
       stateRef.current.normY = 0;
       setJoystickPos({ x: 0, y: 0 });
+      if (stateRef.current.outsideDeadzone) {
+        stateRef.current.outsideDeadzone = false;
+        setIsOutsideDeadzone(false);
+      }
     }
 
     emitAim(stateRef.current.active);
@@ -376,6 +414,10 @@ function AimJoystick({ onAimChange }: { onAimChange?: (x: number, y: number, act
     };
   }, []);
 
+  useEffect(() => () => {
+    clearDeadzonePulseTimeout();
+  }, []);
+
   return (
     <div
       ref={containerRef}
@@ -387,8 +429,7 @@ function AimJoystick({ onAimChange }: { onAimChange?: (x: number, y: number, act
       onPointerCancel={handlePointerCancel}
       onLostPointerCapture={handleLostPointerCapture}
     >
-      <div
-        className="absolute inset-0 rounded-full border-2"
+      <div className="absolute inset-0 rounded-full border-2"
         style={{
           borderColor: isActive ? 'rgba(245,158,11,0.58)' : 'rgba(148,163,184,0.28)',
           boxShadow: isActive
@@ -397,12 +438,11 @@ function AimJoystick({ onAimChange }: { onAimChange?: (x: number, y: number, act
         }}
       />
 
-      <div
-        className="absolute inset-[12px] rounded-full border"
+      <div className="absolute inset-[12px] rounded-full border"
         style={{
           borderColor: isActive ? 'rgba(34,211,238,0.36)' : 'rgba(148,163,184,0.18)',
           background:
-            'radial-gradient(circle at 70% 30%, rgba(245,158,11,0.12) 0%, rgba(2,6,23,0.45) 55%, rgba(0,0,0,0.25) 100%)',
+            'radial-gradient(circle at 30% 30%, rgba(245,158,11,0.12) 0%, rgba(2,6,23,0.45) 55%, rgba(0,0,0,0.25) 100%)',
         }}
       />
 
@@ -419,9 +459,36 @@ function AimJoystick({ onAimChange }: { onAimChange?: (x: number, y: number, act
         }}
       />
 
+      {/* Deadzone ring: when knob stays inside, aim/fire vector remains zero */}
+      <div
+        className="absolute rounded-full border pointer-events-none"
+        style={{
+          width: DEADZONE_RING_SIZE,
+          height: DEADZONE_RING_SIZE,
+          left: '50%',
+          top: '50%',
+          transform: `translate(-50%, -50%) scale(${deadzonePulse ? 1.08 : 1})`,
+          transition: 'transform 120ms ease-out, border-color 120ms ease-out, box-shadow 120ms ease-out',
+          borderStyle: 'dashed',
+          borderColor: deadzonePulse
+            ? 'rgba(34,211,238,0.75)'
+            : isOutsideDeadzone
+              ? 'rgba(245,158,11,0.58)'
+              : isActive
+                ? 'rgba(245,158,11,0.42)'
+                : 'rgba(148,163,184,0.25)',
+          boxShadow: deadzonePulse
+            ? '0 0 20px rgba(34,211,238,0.24)'
+            : isOutsideDeadzone
+              ? '0 0 14px rgba(245,158,11,0.22)'
+              : isActive
+                ? '0 0 12px rgba(245,158,11,0.14)'
+                : 'none',
+        }}
+      />
+
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="absolute top-2 text-white/25 text-[10px] font-bold tracking-widest">AIM</div>
-        <div className="absolute bottom-2 text-white/25 text-[10px] font-bold tracking-widest">FIRE</div>
+        <div className="ui-mono text-[10px] tracking-[0.24em] text-white/35">AIM</div>
       </div>
 
       <div
@@ -433,7 +500,7 @@ function AimJoystick({ onAimChange }: { onAimChange?: (x: number, y: number, act
           top: '50%',
           transform: `translate(calc(-50% + ${joystickPos.x}px), calc(-50% + ${joystickPos.y}px))`,
           background: isActive
-            ? 'radial-gradient(circle at 30% 30%, rgba(254,243,199,0.95), rgba(245,158,11,0.85), rgba(2,6,23,0.85))'
+            ? 'radial-gradient(circle at 30% 30%, rgba(226,232,240,0.95), rgba(245,158,11,0.85), rgba(2,6,23,0.85))'
             : 'radial-gradient(circle at 30% 30%, rgba(148,163,184,0.85), rgba(15,23,42,0.9), rgba(2,6,23,0.9))',
           boxShadow: isActive
             ? '0 0 30px rgba(245,158,11,0.34), 0 0 62px rgba(34,211,238,0.12), inset 0 1px 0 rgba(255,255,255,0.25)'

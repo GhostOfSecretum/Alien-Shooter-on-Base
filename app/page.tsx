@@ -186,9 +186,9 @@ export default function Home() {
     }
   }, []);
 
-  const handleAimChange = useCallback((screenX: number, screenY: number, active: boolean) => {
+  const handleAimChange = useCallback((x: number, y: number, active: boolean) => {
     if (!started) return;
-    appRef.current?.setAim(screenX, screenY, active);
+    appRef.current?.setAim(x, y, active);
     if (active) {
       appRef.current?.enableAudio();
     }

@@ -13,9 +13,9 @@ export type InputState = {
   joystickX: number;  // -1 to 1
   joystickY: number;  // -1 to 1
   joystickActive: boolean;
-  // Mobile aim state
-  aimX: number;
-  aimY: number;
+  // Mobile aim stick vector state
+  aimX: number;         // -1 to 1 (stick X axis)
+  aimY: number;         // -1 to 1 (stick Y axis)
   aimActive: boolean;
 };
 

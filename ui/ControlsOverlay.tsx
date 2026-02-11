@@ -7,7 +7,7 @@ import { ControlKey } from '@/engine/input';
 type ControlsOverlayProps = {
   onControlChange: (control: ControlKey, active: boolean) => void;
   onJoystickChange?: (x: number, y: number, active: boolean) => void;
-  onAimChange?: (screenX: number, screenY: number, active: boolean) => void;
+  onAimChange?: (x: number, y: number, active: boolean) => void;
 };
 
 // Virtual Joystick Component
@@ -230,156 +230,224 @@ function VirtualJoystick({ onJoystickChange }: { onJoystickChange?: (x: number, 
   );
 }
 
-// Aim Zone Component (right side of screen)
-function AimZone({ onAimChange }: { onAimChange?: (screenX: number, screenY: number, active: boolean) => void }) {
-  const zoneRef = useRef<HTMLDivElement>(null);
-  const [aimPos, setAimPos] = useState<{ x: number; y: number } | null>(null);
-  const activePointerId = useRef<number | null>(null);
+// Aim Joystick Component (right side of screen)
+function AimJoystick({ onAimChange }: { onAimChange?: (x: number, y: number, active: boolean) => void }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [joystickPos, setJoystickPos] = useState({ x: 0, y: 0 });
+  const [isActive, setIsActive] = useState(false);
+  const stateRef = useRef({
+    active: false,
+    originX: 0,
+    originY: 0,
+    normX: 0,
+    normY: 0,
+    pointerId: null as number | null,
+  });
+  const callbackRef = useRef(onAimChange);
+  callbackRef.current = onAimChange;
 
-  const handlePointerDown = useCallback((e: PointerEvent<HTMLDivElement>) => {
-    if (activePointerId.current !== null) return;
-    
-    e.preventDefault();
-    e.stopPropagation();
-    
-    const zone = zoneRef.current;
-    if (!zone) return;
-    
-    activePointerId.current = e.pointerId;
-    zone.setPointerCapture(e.pointerId);
-    
-    setAimPos({ x: e.clientX, y: e.clientY });
-    onAimChange?.(e.clientX, e.clientY, true);
-  }, [onAimChange]);
+  const JOYSTICK_SIZE = 132;
+  const KNOB_SIZE = 52;
+  const MAX_DISTANCE = (JOYSTICK_SIZE - KNOB_SIZE) / 2;
+  const DEADZONE = 0.14;
 
-  const handlePointerMove = useCallback((e: PointerEvent<HTMLDivElement>) => {
-    if (activePointerId.current !== e.pointerId) return;
-    
-    e.preventDefault();
-    e.stopPropagation();
-    
-    setAimPos({ x: e.clientX, y: e.clientY });
-    onAimChange?.(e.clientX, e.clientY, true);
-  }, [onAimChange]);
+  const emitAim = (active: boolean) => {
+    callbackRef.current?.(stateRef.current.normX, stateRef.current.normY, active);
+  };
 
-  const handlePointerUp = useCallback((e: PointerEvent<HTMLDivElement>) => {
-    if (activePointerId.current !== e.pointerId) return;
-    
-    e.preventDefault();
-    e.stopPropagation();
-    
-    if (zoneRef.current?.hasPointerCapture(e.pointerId)) {
-      zoneRef.current.releasePointerCapture(e.pointerId);
+  const resetJoystick = () => {
+    stateRef.current.pointerId = null;
+    stateRef.current.active = false;
+    stateRef.current.normX = 0;
+    stateRef.current.normY = 0;
+    setIsActive(false);
+    setJoystickPos({ x: 0, y: 0 });
+    emitAim(false);
+  };
+
+  const updateJoystickFromClientPoint = (clientX: number, clientY: number) => {
+    const dx = clientX - stateRef.current.originX;
+    const dy = clientY - stateRef.current.originY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    if (distance > 0) {
+      const clampedDistance = Math.min(distance, MAX_DISTANCE);
+      const rawMagnitude = clampedDistance / MAX_DISTANCE;
+      const normalizedDx = dx / distance;
+      const normalizedDy = dy / distance;
+      const adjustedMagnitude = rawMagnitude <= DEADZONE
+        ? 0
+        : (rawMagnitude - DEADZONE) / (1 - DEADZONE);
+      const normX = normalizedDx * adjustedMagnitude;
+      const normY = normalizedDy * adjustedMagnitude;
+
+      stateRef.current.normX = normX;
+      stateRef.current.normY = normY;
+
+      setJoystickPos({
+        x: normalizedDx * clampedDistance,
+        y: normalizedDy * clampedDistance,
+      });
+    } else {
+      stateRef.current.normX = 0;
+      stateRef.current.normY = 0;
+      setJoystickPos({ x: 0, y: 0 });
     }
-    activePointerId.current = null;
-    setAimPos(null);
-    onAimChange?.(0, 0, false);
-  }, [onAimChange]);
 
-  const handlePointerCancel = useCallback((e: PointerEvent<HTMLDivElement>) => {
-    if (activePointerId.current !== e.pointerId) return;
+    emitAim(stateRef.current.active);
+  };
+
+  const handlePointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    if (stateRef.current.pointerId !== null) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
 
     e.preventDefault();
     e.stopPropagation();
 
-    if (zoneRef.current?.hasPointerCapture(e.pointerId)) {
-      zoneRef.current.releasePointerCapture(e.pointerId);
-    }
-    activePointerId.current = null;
-    setAimPos(null);
-    onAimChange?.(0, 0, false);
-  }, [onAimChange]);
+    const container = containerRef.current;
+    if (!container) return;
 
-  const handleLostPointerCapture = useCallback((e: PointerEvent<HTMLDivElement>) => {
-    if (activePointerId.current !== e.pointerId) return;
-    activePointerId.current = null;
-    setAimPos(null);
-    onAimChange?.(0, 0, false);
-  }, [onAimChange]);
+    stateRef.current.pointerId = e.pointerId;
+    container.setPointerCapture(e.pointerId);
+
+    const rect = container.getBoundingClientRect();
+    stateRef.current.originX = rect.left + rect.width / 2;
+    stateRef.current.originY = rect.top + rect.height / 2;
+    stateRef.current.active = true;
+
+    updateJoystickFromClientPoint(e.clientX, e.clientY);
+    setIsActive(true);
+  };
+
+  const handlePointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (stateRef.current.pointerId !== e.pointerId) return;
+    if (!stateRef.current.active) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    updateJoystickFromClientPoint(e.clientX, e.clientY);
+  };
+
+  const releasePointerCapture = (pointerId: number) => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (container.hasPointerCapture(pointerId)) {
+      container.releasePointerCapture(pointerId);
+    }
+  };
+
+  const handlePointerUp = (e: PointerEvent<HTMLDivElement>) => {
+    if (stateRef.current.pointerId !== e.pointerId) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    releasePointerCapture(e.pointerId);
+    resetJoystick();
+  };
+
+  const handlePointerCancel = (e: PointerEvent<HTMLDivElement>) => {
+    if (stateRef.current.pointerId !== e.pointerId) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    releasePointerCapture(e.pointerId);
+    resetJoystick();
+  };
+
+  const handleLostPointerCapture = (e: PointerEvent<HTMLDivElement>) => {
+    if (stateRef.current.pointerId !== e.pointerId) return;
+    resetJoystick();
+  };
+
+  useEffect(() => {
+    const handleBlur = () => {
+      if (stateRef.current.active) {
+        resetJoystick();
+      }
+    };
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('visibilitychange', handleBlur);
+    return () => {
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('visibilitychange', handleBlur);
+    };
+  }, []);
 
   return (
     <div
-      ref={zoneRef}
-      className="aim-zone absolute inset-0 touch-none select-none"
+      ref={containerRef}
+      className="virtual-joystick relative touch-none select-none ui-panel ui-scanlines ui-shimmer rounded-full"
+      style={{ width: JOYSTICK_SIZE, height: JOYSTICK_SIZE }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
       onLostPointerCapture={handleLostPointerCapture}
     >
-      {/* faint tactical grid */}
       <div
-        className="absolute inset-0 pointer-events-none opacity-[0.07]"
+        className="absolute inset-0 rounded-full border-2"
         style={{
-          backgroundImage:
-            'linear-gradient(rgba(255,255,255,0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.12) 1px, transparent 1px)',
-          backgroundSize: '80px 80px',
+          borderColor: isActive ? 'rgba(245,158,11,0.58)' : 'rgba(148,163,184,0.28)',
+          boxShadow: isActive
+            ? '0 0 34px rgba(245,158,11,0.22), inset 0 0 0 1px rgba(245,158,11,0.15)'
+            : '0 0 18px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.05)',
         }}
       />
 
       <div
-        className="absolute inset-0 pointer-events-none"
+        className="absolute inset-[12px] rounded-full border"
         style={{
+          borderColor: isActive ? 'rgba(34,211,238,0.36)' : 'rgba(148,163,184,0.18)',
           background:
-            'radial-gradient(circle at 70% 50%, rgba(34,211,238,0.08) 0%, transparent 55%)',
+            'radial-gradient(circle at 70% 30%, rgba(245,158,11,0.12) 0%, rgba(2,6,23,0.45) 55%, rgba(0,0,0,0.25) 100%)',
         }}
       />
 
-      {/* Visual feedback for aim position */}
-      {aimPos && (
-        <div
-          className="absolute pointer-events-none"
-          style={{
-            left: aimPos.x,
-            top: aimPos.y,
-            transform: 'translate(-50%, -50%)',
-          }}
-        >
-          {/* Outer ring */}
-          <div
-            className="absolute rounded-full border-2 animate-ping"
-            style={{
-              width: 60,
-              height: 60,
-              left: -30,
-              top: -30,
-              borderColor: 'rgba(245,158,11,0.65)',
-            }}
-          />
-          {/* Crosshair */}
-          <div className="relative" style={{ width: 40, height: 40, marginLeft: -20, marginTop: -20 }}>
-            {/* Horizontal line */}
-            <div className="absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2" style={{ background: 'rgba(34,211,238,0.85)' }} />
-            {/* Vertical line */}
-            <div className="absolute top-0 bottom-0 left-1/2 w-0.5 -translate-x-1/2" style={{ background: 'rgba(34,211,238,0.85)' }} />
-            {/* Center dot */}
-            <div className="absolute left-1/2 top-1/2 w-2 h-2 rounded-full -translate-x-1/2 -translate-y-1/2"
-                 style={{ background: 'rgba(245,158,11,0.95)', boxShadow: '0 0 18px rgba(245,158,11,0.35)' }} />
-            {/* Corner brackets */}
-            <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2" style={{ borderColor: 'rgba(245,158,11,0.75)' }} />
-            <div className="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2" style={{ borderColor: 'rgba(245,158,11,0.75)' }} />
-            <div className="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2" style={{ borderColor: 'rgba(245,158,11,0.75)' }} />
-            <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2" style={{ borderColor: 'rgba(245,158,11,0.75)' }} />
-          </div>
-        </div>
-      )}
-      
-      {/* Hint text */}
-      {!aimPos && (
-        <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none">
-          <div className="ui-panel ui-scanlines ui-shimmer rounded-2xl px-4 py-3 text-[12px] text-slate-300/70">
-            <div className="ui-mono text-[10px] tracking-[0.25em] text-slate-300/60">TACTICAL</div>
-            <div className="mt-1">
-              Touch to <span className="text-cyan-300/90">aim</span> & <span className="text-amber-300/90">fire</span>
-            </div>
-          </div>
-        </div>
-      )}
+      <div
+        className="absolute rounded-full border pointer-events-none"
+        style={{
+          width: 30,
+          height: 30,
+          left: '50%',
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+          borderColor: isActive ? 'rgba(245,158,11,0.55)' : 'rgba(148,163,184,0.25)',
+          boxShadow: isActive ? '0 0 18px rgba(245,158,11,0.2)' : 'none',
+        }}
+      />
+
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="absolute top-2 text-white/25 text-[10px] font-bold tracking-widest">AIM</div>
+        <div className="absolute bottom-2 text-white/25 text-[10px] font-bold tracking-widest">FIRE</div>
+      </div>
+
+      <div
+        className="absolute rounded-full transition-transform duration-75"
+        style={{
+          width: KNOB_SIZE,
+          height: KNOB_SIZE,
+          left: '50%',
+          top: '50%',
+          transform: `translate(calc(-50% + ${joystickPos.x}px), calc(-50% + ${joystickPos.y}px))`,
+          background: isActive
+            ? 'radial-gradient(circle at 30% 30%, rgba(254,243,199,0.95), rgba(245,158,11,0.85), rgba(2,6,23,0.85))'
+            : 'radial-gradient(circle at 30% 30%, rgba(148,163,184,0.85), rgba(15,23,42,0.9), rgba(2,6,23,0.9))',
+          boxShadow: isActive
+            ? '0 0 30px rgba(245,158,11,0.34), 0 0 62px rgba(34,211,238,0.12), inset 0 1px 0 rgba(255,255,255,0.25)'
+            : '0 10px 20px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.12)',
+          border: isActive ? '2px solid rgba(245,158,11,0.35)' : '2px solid rgba(148,163,184,0.25)',
+        }}
+      />
     </div>
   );
 }
 
 export default function ControlsOverlay({ onControlChange, onJoystickChange, onAimChange }: ControlsOverlayProps) {
+  void onControlChange;
+
   return (
     <div className="pointer-events-none absolute inset-0">
       {/* Joystick area (left side) */}
@@ -387,12 +455,9 @@ export default function ControlsOverlay({ onControlChange, onJoystickChange, onA
         <VirtualJoystick onJoystickChange={onJoystickChange} />
       </div>
 
-      {/* Aim zone (right side - covers most of the right half) - only on mobile */}
-      <div 
-        className="pointer-events-auto absolute right-0 top-0 bottom-0 md:hidden"
-        style={{ width: '55%' }}
-      >
-        <AimZone onAimChange={onAimChange} />
+      {/* Aim joystick (right side) - only on mobile */}
+      <div className="pointer-events-auto absolute right-4 bottom-24 md:hidden">
+        <AimJoystick onAimChange={onAimChange} />
       </div>
 
       {/* Mobile hint at bottom */}

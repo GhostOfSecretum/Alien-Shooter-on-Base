@@ -147,7 +147,7 @@ const ENEMY_TYPES: Record<EnemyType, Omit<Enemy, 'x' | 'y' | 'alive' | 'attackCo
     hp: 25,
     maxHp: 25,
     type: 'runner',
-    speed: 160,
+    speed: 120,
     attackRange: 22,
     damage: 8,
     size: 12,
